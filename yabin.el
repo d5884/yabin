@@ -92,7 +92,7 @@ This value is calculated from `most-positive-fixnum'.")
 (defvar yabin-exponential-form-threshold '(0 . -3)
   "If float number's exponent is over this range, it's displayed exponential form.")
 
-;; 
+;;
 ;; internal functions and macros
 ;;
 
@@ -122,7 +122,7 @@ This value is calculated from `most-positive-fixnum'.")
 	(,(number-to-string -1.0e+INF) . ,yabin--math-ninf)
 	(,(number-to-string  1.0e+INF) . ,yabin--math-uinf)))
     "Alist of Emacs's NaN and infinite representation and `calc' package's one.")
-  
+
   (defconst yabin--default-calc-setting-alist
     '((calc-display-working-message nil)
       (calc-timing nil)
@@ -140,7 +140,7 @@ This value is calculated from `most-positive-fixnum'.")
       (calc-number-radix 10)
       (calc-leading-zeros nil)
       (calc-group-digits nil)
-      
+
       (calc-frac-format '(":" nil))
       (calc-prefer-frac nil)
 
@@ -868,8 +868,8 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
 				       name))
 		    (push (cons (match-string 1 name)
 				sym) alias-alist)))))
-  
-  
+
+
   ; map yabin-FUNC => !FUNC
   (mapc (lambda (fns)
 	  (defalias (intern (format "!%s" (car fns)))
