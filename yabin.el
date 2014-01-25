@@ -74,6 +74,9 @@
 ;;    equal (!=), not-equal (!/=), less-than (!<), less-than-equal (!<=),
 ;;    greater-than (!>), greater-than-equal (!>=)
 
+;;  * Formatting
+;;    format
+
 ;;; Code:
 
 (eval-and-compile
@@ -843,6 +846,186 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
   "Return t if NUM1 is greater than or equal to NUM2."
   (or (yabin-greater-than num1 num2)
       (yabin-equal num1 num2)))
+
+
+;; formatting
+
+(defun yabin--decode-format-spec (spec)
+  "Convert format specification SPEC into `yabin-format' parameter."
+  (save-match-data
+    (unless (string-match
+	     "^%\\([-+ #0]*\\)\\([0-9]*\\)\\(?:\\.\\([0-9]+\\)\\)?\\([doxXgef]\\)$"
+	     spec)
+      (error "Invalid format operation %s" spec))
+    
+    (let ((headers (string-to-list (match-string 1 spec)))
+	  (width (match-string 2 spec))
+	  (precision (match-string 3 spec))
+	  (form (string-to-char (match-string 4 spec)))
+	  spec-plist)
+      
+      (setq spec-plist
+	    (plist-put spec-plist :form
+		       (cond
+			((eq form ?d) 'decimal)
+			((eq form ?o) 'octal)
+			((eq form ?x) 'hex)
+			((eq form ?X) 'hex)
+			((eq form ?f) 'decimal-point)
+			((eq form ?e) 'exponential)
+			((eq form ?g) 'float))))
+      (when (eq form ?X)
+	(setq spec-plist (plist-put spec-plist :upcase t)))
+      (when (and width (not (zerop (length width))))
+      	(setq spec-plist (plist-put spec-plist :width (string-to-number width))))
+      (when (and precision (not (zerop (length precision))))
+      	(setq spec-plist (plist-put spec-plist :precision (string-to-number precision))))
+      (when (memq ?# headers)
+	(setq spec-plist (plist-put spec-plist :special t)))
+      (when (memq ?- headers)
+	(setq spec-plist (plist-put spec-plist :align 'left)))
+      (when (memq ?  headers)
+	(setq spec-plist (plist-put spec-plist :sign 'space)))
+      (when (memq ?+ headers)
+	(setq spec-plist (plist-put spec-plist :sign t)))
+      (when (memq ?0 headers)
+	(setq spec-plist (plist-put spec-plist :zero-padding t)))
+
+      spec-plist
+      )
+    ))
+
+(defun yabin-format (value &rest specs)
+  "Format string-number VALUE according to specification of SPECS.
+Tha next available specification properties:
+
+:spec STRING -- formating by STRING like `format'.
+This is able to format only one number at once. See document of `format'
+for detail.
+
+:sign FLAG -- treatment of number's sign part.
+  t      - print sign.
+  nil    - print sign only when number is negative.
+  'space - print sign. but when number is positive, print blank.
+
+:zero-ppading BOOL -- zero padding flag used when VALUE's width is
+shorten than specified by `:width'.
+  t   - print '0'.
+  nil - print blank.
+
+:align ALIGN -- number alignment used when VALUE's width is shorten
+than specified by `:width'.
+  'right - align right. default behavior.
+  'left  - align left. when enabled this, `:zero-padding' is ignored.
+
+:special FLAG -- special formatting. it's a different behavior by notation.
+  t   - if radix is 16, print leading '0x'; if radix is 8, print leading '0';
+if `:form' is any 'decimal-point, 'exponential or 'float, it causes a decimal
+point '.' to be included even if the precision is zero.
+  nil - do nothing.
+
+:form TYPE -- number's notation.
+  decimal       - decimal.
+  octal         - octal. same as `:radix 8'.
+  hex           - hex. same as `:radix 16'.
+  decimal-point - decimal point notation like '0.000012'.
+  exponential   - exponential notation like '0.31e003'.
+  float         - decimal-point or exponential, whichever uses fewer characters.
+
+:upcase -- using upper case alphabet. this is only affect when radix is over 10.
+  t   - upper case. (ex: 0X3F)
+  nil - lower case. (ex: 0xa9)
+
+:radix NUMBER -- converting into specified base radix when VALUE is integer.
+
+:width NUMBER -- lower limit for the length of the printed number.
+
+:precision NUMBER -- for decimal-point, exponential or float notation, the number
+after the '.' in the precision specifier says how many decimal places to show;
+if zero, the decimal point itself is omitted.
+for decimal, octal or hex notation, lower limit for length of the number."
+  (if (plist-member specs :spec)
+      (apply 'yabin-format value (yabin--decode-format-spec (plist-get specs :spec)))
+    (yabin--local-env
+     ((number (yabin--normalize value))
+      
+      ;; :sign => t, nil, 'space
+      (sign (plist-get specs :sign))
+      ;; :zero-padding => t or nil
+      (zero-padding (plist-get specs :zero-padding))
+      ;; :align => 'left or other(align right)
+      (leftify (eq (plist-get specs :align) 'left))
+      ;; :special => t or nil
+      (special (plist-get specs :special))
+      ;; :form => 'decimal, 'octal, 'hex, 'float, 'decimal-point, 'exponential
+      (form (plist-get specs :form))
+      (form-decimalp (memq form '(decimal octal hex)))
+      (form-floatp (memq form '(float decimal-point exponential)))
+      ;; :witth => number
+      (width (or (plist-get specs :width) 0))
+      ;; :precision => number
+      (precision (plist-get specs :precision))
+      ;; :radix => number
+      (radix (or (plist-get specs :radix)
+		 (when (eq form 'octal) 8)
+		 (when (eq form 'hex) 16)
+		 10))
+      ;; :upcase => t or nil
+      (upcase (plist-get specs :upcase))
+
+      ;; override calc-environment
+      (calc-float-format (cond
+			  ((eq form 'decimal-point)
+			   (list 'fix (or precision 6)))
+			  ((eq form 'exponential)
+			   (list 'sci (or precision 6)))
+			  (t
+			   (list 'float (or precision 0)))))
+      (calc-number-radix radix)
+      (math-radix-explicit-format nil)
+      (calc-radix-formatter (lambda (rad num) (format "%s" num)))
+
+      ;; presentation values
+      (header (concat
+	       (cond ((math-lessp number 0) "-")
+		     ((eq sign 'space) " ")
+		     (sign "+"))
+	       (if special
+		   (cond ((eq radix 16) "0x")
+			 ((eq radix 8) "0")))))
+      (body (yabin--to-string (math-abs
+			       (cond
+				((or form-decimalp
+				     (and (not special)
+					  (eq precision 0)))
+				 (math-trunc number))
+				(form-floatp
+				 (math-float (if (eq precision 0)
+						 (math-trunc number)
+					       number)))
+				(t number)))))
+      (prec-pad-len (if (and form-decimalp precision)
+			(max 0 (- precision (length body)))
+		      0))
+      (pad-len (- width (+ (length header)
+			   prec-pad-len
+			   (length body)))))
+    
+     ;; combine header, padding, body
+     (setq body
+	   (cond
+	    ((<= pad-len 0)
+	     (concat header (make-string prec-pad-len ?0) body))
+	    (leftify
+	     (concat header (make-string prec-pad-len ?0) body (make-string pad-len ? )))
+	    ((and zero-padding (not precision))
+	     (concat header (make-string pad-len ?0) body))
+	    (t
+	     (concat (make-string pad-len ? ) header (make-string prec-pad-len ?0) body))))
+     (if (not upcase)
+	 (downcase body)
+       body)
+     )))
 
 ;; install aliases
 
