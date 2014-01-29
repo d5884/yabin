@@ -153,6 +153,9 @@ This value is calculated from `most-positive-fixnum'.")
       (calc-display-raw nil)
       (calc-symbolic-mode nil))
     "Default `calc' environment values.")
+
+  (defconst yabin--default-format-precision 6
+    "Default precision value using format.")
   )
 
 (defun yabin--read-number (string)
@@ -854,7 +857,7 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
   "Convert format specification SPEC into `yabin-format' parameter."
   (save-match-data
     (unless (string-match
-	     "^%\\([-+ #0]*\\)\\([0-9]*\\)\\(?:\\.\\([0-9]+\\)\\)?\\([doxXgef]\\)$"
+	     "^%\\([-+ #0]*\\)\\([0-9]*\\)\\(?:\\.\\([0-9]+\\)\\)?\\([doxXgGeEf]\\)$"
 	     spec)
       (error "Invalid format operation %s" spec))
     
@@ -873,8 +876,10 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
 			((eq form ?X) 'hex)
 			((eq form ?f) 'decimal-point)
 			((eq form ?e) 'exponential)
-			((eq form ?g) 'float))))
-      (when (eq form ?X)
+			((eq form ?E) 'exponential)
+			((eq form ?g) 'float)
+			((eq form ?G) 'float))))
+      (when (memq form '(?X ?E ?G))
 	(setq spec-plist (plist-put spec-plist :upcase t)))
       (when (and width (not (zerop (length width))))
       	(setq spec-plist (plist-put spec-plist :width (string-to-number width))))
@@ -932,9 +937,10 @@ point '.' to be included even if the precision is zero.
   exponential   - exponential notation like '0.31e003'.
   float         - decimal-point or exponential, whichever uses fewer characters.
 
-:upcase -- using upper case alphabet. this is only affect when radix is over 10.
-  t   - upper case. (ex: 0X3F)
-  nil - lower case. (ex: 0xa9)
+:upcase -- using upper case alphabet. this is only affect when radix is over 10,
+exponential form, or float form type.
+  t   - upper case. (ex: 0X3F, 0.31E+010)
+  nil - lower case. (ex: 0xa9, 1,98e-001)
 
 :radix NUMBER -- converting into specified base radix when VALUE is integer.
 
@@ -974,7 +980,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
 
       ;; override calc-environment
       (calc-internal-prec (max (or precision 0) yabin-internal-prec))
-      (calc-float-format (list 'fix (or precision 6)))
+      (calc-float-format (list 'fix (or precision yabin--default-format-precision)))
       (calc-number-radix radix)
       (math-radix-explicit-format nil)
       (calc-radix-formatter (lambda (rad num) (format "%s" num)))
@@ -1004,7 +1010,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
 	      (concat 
 	       (math-format-number
 		(math-float (math-abs (calcFunc-mant number))))
-	       "e"
+	       (if upcase "E" "e")
 	       (let* ((xpon (calcFunc-xpon number))
 		      (xpon-neg (math-lessp xpon 0))
 		      (xpon-body (math-format-number (math-abs xpon)))
