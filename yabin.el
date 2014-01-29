@@ -947,8 +947,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
   (if (plist-member specs :spec)
       (apply 'yabin-format value (yabin--decode-format-spec (plist-get specs :spec)))
     (yabin--local-env
-     ((number (yabin--normalize value))
-      
+     (
       ;; :sign => t, nil, 'space
       (sign (plist-get specs :sign))
       ;; :zero-padding => t or nil
@@ -974,18 +973,15 @@ for decimal, octal or hex notation, lower limit for length of the number."
       (upcase (plist-get specs :upcase))
 
       ;; override calc-environment
-      (calc-float-format (cond
-			  ((eq form 'decimal-point)
-			   (list 'fix (or precision 6)))
-			  ((eq form 'exponential)
-			   (list 'sci (or precision 6)))
-			  (t
-			   (list 'float (or precision 0)))))
+      (calc-internal-prec (max (or precision 0) yabin-internal-prec))
+      (calc-float-format (list 'fix (or precision 6)))
       (calc-number-radix radix)
       (math-radix-explicit-format nil)
       (calc-radix-formatter (lambda (rad num) (format "%s" num)))
 
       ;; presentation values
+      (number (yabin--normalize value))
+      
       (header (concat
 	       (cond ((math-lessp number 0) "-")
 		     ((eq sign 'space) " ")
@@ -993,17 +989,34 @@ for decimal, octal or hex notation, lower limit for length of the number."
 	       (if special
 		   (cond ((eq radix 16) "0x")
 			 ((eq radix 8) "0")))))
-      (body (yabin--to-string (math-abs
-			       (cond
-				((or form-decimalp
-				     (and (not special)
-					  (eq precision 0)))
-				 (math-trunc number))
-				(form-floatp
-				 (math-float (if (eq precision 0)
-						 (math-trunc number)
-					       number)))
-				(t number)))))
+      (body (cond
+	     ;; decimal/octal/hex
+	     ((and form-decimalp
+	      (yabin--to-string (math-abs (math-trunc number)))))
+	     ;; decimal-point
+	     ((eq form 'decimal-point)
+	      (yabin--to-string
+	       (math-abs (math-float (if (and (eq precision 0) (not special))
+			       (math-trunc number)
+			     number)))))
+	     ;; exponential
+	     ((eq form 'exponential)
+	      (concat 
+	       (math-format-number
+		(math-float (math-abs (calcFunc-mant number))))
+	       "e"
+	       (let* ((xpon (calcFunc-xpon number))
+		      (xpon-neg (math-lessp xpon 0))
+		      (xpon-body (math-format-number (math-abs xpon)))
+		      (xpon-pad (max 0 (- 3 (length xpon-body)))))
+		 (format "%s%s%s"
+			 (if xpon-neg "-" "+")
+			 (make-string xpon-pad ?0)
+			 xpon-body))
+	       ))
+	     ;; not specified
+	     (t
+	      (yabin--to-string number))))
       (prec-pad-len (if (and form-decimalp precision)
 			(max 0 (- precision (length body)))
 		      0))
