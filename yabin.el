@@ -1007,32 +1007,44 @@ for decimal, octal or hex notation, lower limit for length of the number."
 		    (xpon (calcFunc-xpon number))
 		    (float-precision (cadr calc-float-format)))
 		
-		(if (or (eq form 'decimal-point)
-			(and (eq form 'float)
-			     (math-lessp xpon (car yabin-exponential-form-threshold))
-			     (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
-		    (progn
-		      (when (eq form 'float)
-			(setq float-precision (+ float-precision
-						 (math-abs xpon)
-						 -1))
-			(setq calc-float-format (list 'fix float-precision)))
-		      (setq mant number)
-		      (setq xpon nil)))
+		(when (or (eq form 'decimal-point)
+			  (and (eq form 'float)
+			       (math-lessp xpon (car yabin-exponential-form-threshold))
+			       (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
+
+		  (when (eq form 'float)
+		    (setq float-precision (+ float-precision
+					     (math-abs xpon)
+					     (if (or (eq float-precision 0)
+						     (math-zerop mant)) 0 -1)))
+		    (setq calc-float-format (list 'fix float-precision)))
+		  (setq mant number)
+		  (setq xpon nil))
 		
 		(concat 
 		 ;; mantissa
 		 (progn
 		   (setq mant (math-round mant float-precision))
 		   (cond
-		    ((not (and (math-zerop mant)
-			       (eq precision 0)))
-		     (let ((val (yabin--to-string (math-float mant))))
-		       (if (and (eq form 'float) (not special))
-			   (save-match-data (replace-regexp-in-string "0*$" "" val))
-			 val)))
-		    (special (if (eq form 'float) "0.0" "0."))
-		    (t "0")))
+		    ((eq form 'float)
+		     (if (not special)
+			 (if (math-zerop mant) ; ignore precision
+			     "0"
+			   (save-match-data (replace-regexp-in-string
+					     "0*$" "" (yabin--to-string (math-float mant)))))
+		       (if (and (math-zerop mant) (eq precision 0))
+			   "0.0"
+			 (yabin--to-string (math-float mant))
+			 )))
+		    (t
+		     (if (not special)
+			 (if (and (math-zerop mant) (eq precision 0))
+			     "0"
+			   (yabin--to-string (math-float mant)))
+		       (if (and (math-zerop mant) (eq precision 0))
+			   "0."
+			 (yabin--to-string (math-float mant))
+			 )))))
 		 
 		 ;; exponential
 		 (if xpon
