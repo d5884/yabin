@@ -75,7 +75,7 @@
 ;;    greater-than (!>), greater-than-equal (!>=)
 
 ;;  * Formatting
-;;    format
+;;    format, format-spec
 
 ;;; Code:
 
@@ -92,7 +92,7 @@ This value is calculated from `most-positive-fixnum'.")
 (defvar yabin-internal-prec 20
   "Internal precision for calculating floating number.")
 
-(defvar yabin-exponential-form-threshold '(0 . -3)
+(defvar yabin-exponential-form-threshold '(6 . -5)
   "If float number's exponent is over this range, it's displayed exponential form.")
 
 ;;
@@ -853,18 +853,18 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
 
 ;; formatting
 
-(defun yabin--decode-format-spec (spec)
-  "Convert format specification SPEC into `yabin-format' parameter."
+(defun yabin--decode-format-string (format-string)
+  "Convert FORMAT-STRING into `yabin-format' parameter."
   (save-match-data
     (unless (string-match
 	     "^%\\([-+ #0]*\\)\\([0-9]*\\)\\(?:\\.\\([0-9]+\\)\\)?\\([doxXgGeEf]\\)$"
-	     spec)
-      (error "Invalid format operation %s" spec))
+	     format-string)
+      (error "Invalid format operation %s" format-string))
     
-    (let ((headers (string-to-list (match-string 1 spec)))
-	  (width (match-string 2 spec))
-	  (precision (match-string 3 spec))
-	  (form (string-to-char (match-string 4 spec)))
+    (let ((headers (string-to-list (match-string 1 format-string)))
+	  (width (match-string 2 format-string))
+	  (precision (match-string 3 format-string))
+	  (form (string-to-char (match-string 4 format-string)))
 	  spec-plist)
       
       (setq spec-plist
@@ -900,13 +900,15 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
       )
     ))
 
-(defun yabin-format (value &rest specs)
+(defun yabin-format (format-string value)
+  "Format VALUE according to FORMAT-STRING like `format'.
+This is able to format only one number at once. See document of `format'
+for detail."
+  (apply 'yabin-format-spec value (yabin--decode-format-spec format-string)))
+
+(defun yabin-format-spec (value &rest specs)
   "Format string-number VALUE according to specification of SPECS.
 Tha next available specification properties:
-
-:spec STRING -- formating by STRING like `format'.
-This is able to format only one number at once. See document of `format'
-for detail.
 
 :sign FLAG -- treatment of number's sign part.
   t      - print sign.
@@ -950,8 +952,6 @@ exponential form, or float form type.
 after the '.' in the precision specifier says how many decimal places to show;
 if zero, the decimal point itself is omitted.
 for decimal, octal or hex notation, lower limit for length of the number."
-  (if (plist-member specs :spec)
-      (apply 'yabin-format value (yabin--decode-format-spec (plist-get specs :spec)))
     (yabin--local-env
      (
       ;; :sign => t, nil, 'space
@@ -963,7 +963,9 @@ for decimal, octal or hex notation, lower limit for length of the number."
       ;; :special => t or nil
       (special (plist-get specs :special))
       ;; :form => 'decimal, 'octal, 'hex, 'float, 'decimal-point, 'exponential
-      (form (plist-get specs :form))
+      (form (or (plist-get specs :form)
+		(when (yabin-integerp value) 'decimal)
+		'float))
       (form-decimalp (memq form '(decimal octal hex)))
       (form-floatp (memq form '(float decimal-point exponential)))
       ;; :witth => number
@@ -974,6 +976,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
       (radix (or (plist-get specs :radix)
 		 (when (eq form 'octal) 8)
 		 (when (eq form 'hex) 16)
+		 (when form-floatp 10)
 		 10))
       ;; :upcase => t or nil
       (upcase (plist-get specs :upcase))
@@ -995,34 +998,54 @@ for decimal, octal or hex notation, lower limit for length of the number."
 	       (if special
 		   (cond ((eq radix 16) "0x")
 			 ((eq radix 8) "0")))))
-      (body (cond
-	     ;; decimal/octal/hex
-	     ((and form-decimalp
-	      (yabin--to-string (math-abs (math-trunc number)))))
-	     ;; decimal-point
-	     ((eq form 'decimal-point)
-	      (yabin--to-string
-	       (math-abs (math-float (if (and (eq precision 0) (not special))
-			       (math-trunc number)
-			     number)))))
-	     ;; exponential
-	     ((eq form 'exponential)
-	      (concat 
-	       (math-format-number
-		(math-float (math-abs (calcFunc-mant number))))
-	       (if upcase "E" "e")
-	       (let* ((xpon (calcFunc-xpon number))
-		      (xpon-neg (math-lessp xpon 0))
-		      (xpon-body (math-format-number (math-abs xpon)))
-		      (xpon-pad (max 0 (- 3 (length xpon-body)))))
-		 (format "%s%s%s"
-			 (if xpon-neg "-" "+")
-			 (make-string xpon-pad ?0)
-			 xpon-body))
-	       ))
-	     ;; not specified
-	     (t
-	      (yabin--to-string number))))
+      (body (if form-decimalp
+		;; decimal/octal/hex
+		(yabin--to-string (math-abs (math-trunc number)))
+	      ;; float/decimal-point/exponential
+	      (setq number (math-abs (math-float number)))
+	      (let ((mant (calcFunc-mant number))
+		    (xpon (calcFunc-xpon number))
+		    (float-precision (cadr calc-float-format)))
+		
+		(if (or (eq form 'decimal-point)
+			(and (eq form 'float)
+			     (math-lessp xpon (car yabin-exponential-form-threshold))
+			     (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
+		    (progn
+		      (when (eq form 'float)
+			(setq float-precision (+ float-precision
+						 (math-abs xpon)
+						 -1))
+			(setq calc-float-format (list 'fix float-precision)))
+		      (setq mant number)
+		      (setq xpon nil)))
+		
+		(concat 
+		 ;; mantissa
+		 (progn
+		   (setq mant (math-round mant float-precision))
+		   (cond
+		    ((not (and (math-zerop mant)
+			       (eq float-precision 0)))
+		     (let ((val (yabin--to-string (math-float mant))))
+		       (if (eq form 'float)
+			   (save-match-data (replace-regexp-in-string "0*$" "" val))
+			 val)))
+		    (special (if (eq form 'float) "0.0" "0."))
+		    (t "0")))
+		 
+		 ;; exponential
+		 (if xpon
+		     (concat 
+		      (if upcase "E" "e")
+		      (let* ((xpon-neg (math-lessp xpon 0))
+			     (xpon-body (math-format-number (math-abs xpon)))
+			     (xpon-pad (max 0 (- 3 (length xpon-body)))))
+			(format "%s%s%s"
+				(if xpon-neg "-" "+")
+				(make-string xpon-pad ?0)
+				xpon-body))))
+		 ))))
       (prec-pad-len (if (and form-decimalp precision)
 			(max 0 (- precision (length body)))
 		      0))
@@ -1044,7 +1067,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
      (if (not upcase)
 	 (downcase body)
        body)
-     )))
+     ))
 
 ;; install aliases
 
