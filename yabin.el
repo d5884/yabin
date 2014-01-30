@@ -1000,64 +1000,74 @@ for decimal, octal or hex notation, lower limit for length of the number."
 			 ((eq radix 8) "0")))))
       (body (if form-decimalp
 		;; decimal/octal/hex
-		(yabin--to-string (math-abs (math-trunc number)))
+		(yabin--to-string (if (not (math-realp number))
+				      0 ; nan/inf value.
+				    (math-abs (math-trunc number))))
 	      ;; float/decimal-point/exponential
-	      (setq number (math-abs (math-float number)))
-	      (let ((mant (calcFunc-mant number))
-		    (xpon (calcFunc-xpon number))
-		    (float-precision (cadr calc-float-format)))
+	      (let* ((float-number (math-abs (math-float number)))
+		     (mant (calcFunc-mant float-number))
+		     (xpon (calcFunc-xpon float-number))
+		     (float-precision (cadr calc-float-format))
+		     (infinitep (math-infinitep number)))
 		
-		(when (or (eq form 'decimal-point)
-			  (and (eq form 'float)
-			       (math-lessp xpon (car yabin-exponential-form-threshold))
-			       (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
+		;; NOTE: the nan value from `format' is depend by system, but
+		;; yabin uses "nan" and "inf" literal.
+		(if infinitep
+		    (progn
+		      (setq zero-padding nil)
+		      (cond
+		       ((member number (list yabin--math-pnan yabin--math-nnan))
+			"nan")
+		       (t
+			"inf")))
+		
+		  ;; not a nan/inf
+		  (when (or (eq form 'decimal-point)
+			    (and (eq form 'float)
+				 (math-lessp xpon (car yabin-exponential-form-threshold))
+				 (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
 
-		  (when (eq form 'float)
-		    (setq float-precision (+ float-precision
-					     (math-abs xpon)
-					     (if (or (eq float-precision 0)
-						     (math-zerop mant)) 0 -1)))
-		    (setq calc-float-format (list 'fix float-precision)))
-		  (setq mant number)
-		  (setq xpon nil))
+		    (when (eq form 'float)
+		      (setq float-precision (+ float-precision
+					       (math-abs xpon)
+					       (if (or (eq float-precision 0)
+						       (math-zerop mant)) 0 -1)))
+		      (setq calc-float-format (list 'fix float-precision)))
+		    (setq mant float-number)
+		    (setq xpon nil))
 		
-		(concat 
-		 ;; mantissa
-		 (progn
-		   (setq mant (math-round mant float-precision))
-		   (cond
-		    ((eq form 'float)
-		     (if (not special)
+		  (concat 
+		   ;; mantissa
+		   (progn
+		     (setq mant (math-round mant float-precision))
+		     (cond
+		      ((eq form 'float)
+		       (if special
+			   (if (and (math-zerop mant) (eq precision 0))
+			       "0.0"
+			     (yabin--to-string (math-float mant)))
 			 (if (math-zerop mant) ; ignore precision
 			     "0"
 			   (save-match-data (replace-regexp-in-string
 					     "0*$" "" (yabin--to-string (math-float mant)))))
-		       (if (and (math-zerop mant) (eq precision 0))
-			   "0.0"
-			 (yabin--to-string (math-float mant))
-			 )))
-		    (t
-		     (if (not special)
-			 (if (and (math-zerop mant) (eq precision 0))
-			     "0"
-			   (yabin--to-string (math-float mant)))
-		       (if (and (math-zerop mant) (eq precision 0))
-			   "0."
-			 (yabin--to-string (math-float mant))
-			 )))))
-		 
-		 ;; exponential
-		 (if xpon
-		     (concat 
-		      (if upcase "E" "e")
-		      (let* ((xpon-neg (math-lessp xpon 0))
-			     (xpon-body (math-format-number (math-abs xpon)))
-			     (xpon-pad (max 0 (- 3 (length xpon-body)))))
-			(format "%s%s%s"
-				(if xpon-neg "-" "+")
-				(make-string xpon-pad ?0)
-				xpon-body))))
-		 ))))
+			 ))
+		      (t
+		       (if (not (and (math-zerop mant) (eq precision 0)))
+			   (yabin--to-string (math-float mant))
+			 (if special "0." "0")))))
+		 		 
+		   ;; exponential
+		   (if xpon
+		       (concat 
+			(if upcase "E" "e")
+			(let* ((xpon-neg (math-lessp xpon 0))
+			       (xpon-body (math-format-number (math-abs xpon)))
+			       (xpon-pad (max 0 (- 3 (length xpon-body)))))
+			  (format "%s%s%s"
+				  (if xpon-neg "-" "+")
+				  (make-string xpon-pad ?0)
+				  xpon-body))))
+		   )))))
       (prec-pad-len (if (and form-decimalp precision)
 			(max 0 (- precision (length body)))
 		      0))
