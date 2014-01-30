@@ -1082,7 +1082,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
 	     (concat header (make-string prec-pad-len ?0) body))
 	    (leftify
 	     (concat header (make-string prec-pad-len ?0) body (make-string pad-len ? )))
-	    ((and zero-padding (not precision))
+	    ((and zero-padding (null precision))
 	     (concat header (make-string pad-len ?0) body))
 	    (t
 	     (concat (make-string pad-len ? ) header (make-string prec-pad-len ?0) body))))
