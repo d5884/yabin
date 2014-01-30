@@ -1026,9 +1026,9 @@ for decimal, octal or hex notation, lower limit for length of the number."
 		   (setq mant (math-round mant float-precision))
 		   (cond
 		    ((not (and (math-zerop mant)
-			       (eq float-precision 0)))
+			       (eq precision 0)))
 		     (let ((val (yabin--to-string (math-float mant))))
-		       (if (eq form 'float)
+		       (if (and (eq form 'float) (not special))
 			   (save-match-data (replace-regexp-in-string "0*$" "" val))
 			 val)))
 		    (special (if (eq form 'float) "0.0" "0."))
