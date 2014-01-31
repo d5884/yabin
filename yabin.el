@@ -904,7 +904,7 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
   "Format VALUE according to FORMAT-STRING like `format'.
 This is able to format only one number at once. See document of `format'
 for detail."
-  (apply 'yabin-format-spec value (yabin--decode-format-spec format-string)))
+  (apply 'yabin-format-spec value (yabin--decode-format-string format-string)))
 
 (defun yabin-format-spec (value &rest specs)
   "Format string-number VALUE according to specification of SPECS.
