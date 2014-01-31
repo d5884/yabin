@@ -1000,19 +1000,18 @@ for decimal, octal or hex notation, lower limit for length of the number."
 			 ((eq radix 8) "0")))))
       (body (if form-decimalp
 		;; decimal/octal/hex
-		(yabin--to-string (if (not (math-realp number))
+		(yabin--to-string (if (math-infinitep number)
 				      0 ; nan/inf value.
 				    (math-abs (math-trunc number))))
 	      ;; float/decimal-point/exponential
 	      (let* ((float-number (math-abs (math-float number)))
 		     (mant (calcFunc-mant float-number))
 		     (xpon (calcFunc-xpon float-number))
-		     (float-precision (cadr calc-float-format))
-		     (infinitep (math-infinitep number)))
+		     (float-precision (cadr calc-float-format)))
 		
 		;; NOTE: the nan value from `format' is depend by system, but
 		;; yabin uses "nan" and "inf" literal.
-		(if infinitep
+		(if (math-infinitep number)
 		    (progn
 		      (setq zero-padding nil)
 		      (cond
@@ -1020,7 +1019,6 @@ for decimal, octal or hex notation, lower limit for length of the number."
 			"nan")
 		       (t
 			"inf")))
-		
 		  ;; not a nan/inf
 		  (when (or (eq form 'decimal-point)
 			    (and (eq form 'float)
@@ -1031,7 +1029,8 @@ for decimal, octal or hex notation, lower limit for length of the number."
 		      (setq float-precision (+ float-precision
 					       (math-abs xpon)
 					       (if (or (eq float-precision 0)
-						       (math-zerop mant)) 0 -1)))
+						       (math-zerop mant))
+						   0 -1)))
 		      (setq calc-float-format (list 'fix float-precision)))
 		    (setq mant float-number)
 		    (setq xpon nil))
@@ -1057,16 +1056,14 @@ for decimal, octal or hex notation, lower limit for length of the number."
 			 (if special "0." "0")))))
 		 		 
 		   ;; exponential
-		   (if xpon
-		       (concat 
+		   (when xpon
+		     (let* ((xpon-body (math-format-number (math-abs xpon)))
+			    (xpon-pad (max 0 (- 3 (length xpon-body)))))
+		       (concat
 			(if upcase "E" "e")
-			(let* ((xpon-neg (math-lessp xpon 0))
-			       (xpon-body (math-format-number (math-abs xpon)))
-			       (xpon-pad (max 0 (- 3 (length xpon-body)))))
-			  (format "%s%s%s"
-				  (if xpon-neg "-" "+")
-				  (make-string xpon-pad ?0)
-				  xpon-body))))
+			(if (math-negp xpon) "-" "+")
+			(make-string xpon-pad ?0)
+			xpon-body)))
 		   )))))
       (prec-pad-len (if (and form-decimalp precision)
 			(max 0 (- precision (length body)))
