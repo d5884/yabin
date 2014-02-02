@@ -1021,19 +1021,22 @@ for decimal, octal or hex notation, lower limit for length of the number."
 			"inf")))
 		  ;; not a nan/inf
 		  (when (or (eq form 'decimal-point)
-			    (and (eq form 'float)
-				 (math-lessp xpon (car yabin-exponential-form-threshold))
-				 (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
+			  (and (eq form 'float)
+			       (math-lessp xpon (car yabin-exponential-form-threshold))
+			       (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
 
-		    (when (eq form 'float)
-		      (setq float-precision (+ float-precision
-					       (math-abs xpon)
-					       (if (or (eq float-precision 0)
-						       (math-zerop mant))
-						   0 -1)))
-		      (setq calc-float-format (list 'fix float-precision)))
-		    (setq mant float-number)
-		    (setq xpon nil))
+			(when (eq form 'float)
+			  (setq float-precision (+ float-precision
+						   (math-neg xpon))))
+			(setq mant float-number)
+			(setq xpon nil))
+		  
+		  (when (eq form 'float)
+		    (setq float-precision (+ float-precision
+					     (if (or (eq float-precision 0)
+						     (math-zerop mant))
+						 0 -1)))
+		    (setq calc-float-format (list 'fix float-precision)))
 		
 		  (concat 
 		   ;; mantissa
@@ -1048,7 +1051,7 @@ for decimal, octal or hex notation, lower limit for length of the number."
 			 (if (math-zerop mant) ; ignore precision
 			     "0"
 			   (save-match-data (replace-regexp-in-string
-					     "0*$" "" (yabin--to-string (math-float mant)))))
+					     "\\.?0*$" "" (yabin--to-string (math-float mant)))))
 			 ))
 		      (t
 		       (if (not (and (math-zerop mant) (eq precision 0)))
