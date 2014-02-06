@@ -4,7 +4,7 @@
 
 ;; Author: Daisuke Kobayashi <d5884jp@gmail.com>
 ;; Keywords: data
-;; Version: 1.0
+;; Version: 1.1
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -74,6 +74,9 @@
 ;;    equal (!=), not-equal (!/=), less-than (!<), less-than-equal (!<=),
 ;;    greater-than (!>), greater-than-equal (!>=)
 
+;;  * Formatting
+;;    format, format-spec
+
 ;;; Code:
 
 (eval-and-compile
@@ -89,7 +92,7 @@ This value is calculated from `most-positive-fixnum'.")
 (defvar yabin-internal-prec 20
   "Internal precision for calculating floating number.")
 
-(defvar yabin-exponential-form-threshold '(0 . -3)
+(defvar yabin-exponential-form-threshold '(6 . -5)
   "If float number's exponent is over this range, it's displayed exponential form.")
 
 ;;
@@ -150,6 +153,9 @@ This value is calculated from `most-positive-fixnum'.")
       (calc-display-raw nil)
       (calc-symbolic-mode nil))
     "Default `calc' environment values.")
+
+  (defconst yabin--default-format-precision 6
+    "Default precision value using format.")
   )
 
 (defun yabin--read-number (string)
@@ -843,6 +849,247 @@ BYTES must be consisted by 8-bit integer ordered as little endian."
   "Return t if NUM1 is greater than or equal to NUM2."
   (or (yabin-greater-than num1 num2)
       (yabin-equal num1 num2)))
+
+
+;; formatting
+
+(defun yabin--decode-format-string (format-string)
+  "Convert FORMAT-STRING into `yabin-format' parameter."
+  (save-match-data
+    (unless (string-match
+	     "^%\\([-+ #0]*\\)\\([0-9]*\\)\\(?:\\.\\([0-9]+\\)\\)?\\([doxXgGeEf]\\)$"
+	     format-string)
+      (error "Invalid format operation %s" format-string))
+    
+    (let ((headers (string-to-list (match-string 1 format-string)))
+	  (width (match-string 2 format-string))
+	  (precision (match-string 3 format-string))
+	  (form (string-to-char (match-string 4 format-string)))
+	  spec-plist)
+      
+      (setq spec-plist
+	    (plist-put spec-plist :form
+		       (cond
+			((eq form ?d) 'decimal)
+			((eq form ?o) 'octal)
+			((eq form ?x) 'hex)
+			((eq form ?X) 'hex)
+			((eq form ?f) 'decimal-point)
+			((eq form ?e) 'exponential)
+			((eq form ?E) 'exponential)
+			((eq form ?g) 'float)
+			((eq form ?G) 'float))))
+      (when (memq form '(?X ?E ?G))
+	(setq spec-plist (plist-put spec-plist :upcase t)))
+      (when (and width (not (zerop (length width))))
+      	(setq spec-plist (plist-put spec-plist :width (string-to-number width))))
+      (when (and precision (not (zerop (length precision))))
+      	(setq spec-plist (plist-put spec-plist :precision (string-to-number precision))))
+      (when (memq ?# headers)
+	(setq spec-plist (plist-put spec-plist :special t)))
+      (when (memq ?- headers)
+	(setq spec-plist (plist-put spec-plist :align 'left)))
+      (when (memq ?  headers)
+	(setq spec-plist (plist-put spec-plist :sign 'space)))
+      (when (memq ?+ headers)
+	(setq spec-plist (plist-put spec-plist :sign t)))
+      (when (memq ?0 headers)
+	(setq spec-plist (plist-put spec-plist :zero-padding t)))
+
+      spec-plist
+      )
+    ))
+
+(defun yabin-format (format-string value)
+  "Format VALUE according to FORMAT-STRING like `format'.
+This is able to format only one number at once. See document of `format'
+for detail."
+  (apply 'yabin-format-spec value (yabin--decode-format-string format-string)))
+
+(defun yabin-format-spec (value &rest specs)
+  "Format string-number VALUE according to specification of SPECS.
+Tha next available specification properties:
+
+:sign FLAG -- treatment of number's sign part.
+  t      - print sign.
+  nil    - print sign only when number is negative.
+  'space - print sign. but when number is positive, print blank.
+
+:zero-ppading BOOL -- zero padding flag used when VALUE's width is
+shorten than specified by `:width'.
+  t   - print '0'.
+  nil - print blank.
+
+:align ALIGN -- number alignment used when VALUE's width is shorten
+than specified by `:width'.
+  'right - align right. default behavior.
+  'left  - align left. when enabled this, `:zero-padding' is ignored.
+
+:special FLAG -- special formatting. it's a different behavior by notation.
+  t   - if radix is 16, print leading '0x'; if radix is 8, print leading '0';
+if `:form' is any 'decimal-point, 'exponential or 'float, it causes a decimal
+point '.' to be included even if the precision is zero.
+  nil - do nothing.
+
+:form TYPE -- number's notation.
+  decimal       - decimal.
+  octal         - octal. same as `:radix 8'.
+  hex           - hex. same as `:radix 16'.
+  decimal-point - decimal point notation like '0.000012'.
+  exponential   - exponential notation like '0.31e003'.
+  float         - decimal-point or exponential, whichever uses fewer characters.
+
+:upcase -- using upper case alphabet. this is only affect when radix is over 10,
+exponential form, or float form type.
+  t   - upper case. (ex: 0X3F, 0.31E+010)
+  nil - lower case. (ex: 0xa9, 1,98e-001)
+
+:radix NUMBER -- converting into specified base radix when VALUE is integer.
+
+:width NUMBER -- lower limit for the length of the printed number.
+
+:precision NUMBER -- for decimal-point, exponential or float notation, the number
+after the '.' in the precision specifier says how many decimal places to show;
+if zero, the decimal point itself is omitted.
+for decimal, octal or hex notation, lower limit for length of the number."
+    (yabin--local-env
+     (
+      ;; :sign => t, nil, 'space
+      (sign (plist-get specs :sign))
+      ;; :zero-padding => t or nil
+      (zero-padding (plist-get specs :zero-padding))
+      ;; :align => 'left or other(align right)
+      (leftify (eq (plist-get specs :align) 'left))
+      ;; :special => t or nil
+      (special (plist-get specs :special))
+      ;; :form => 'decimal, 'octal, 'hex, 'float, 'decimal-point, 'exponential
+      (form (or (plist-get specs :form)
+		(when (yabin-integerp value) 'decimal)
+		'float))
+      (form-decimalp (memq form '(decimal octal hex)))
+      (form-floatp (memq form '(float decimal-point exponential)))
+      ;; :witth => number
+      (width (or (plist-get specs :width) 0))
+      ;; :precision => number
+      (precision (plist-get specs :precision))
+      ;; :radix => number
+      (radix (or (plist-get specs :radix)
+		 (when (eq form 'octal) 8)
+		 (when (eq form 'hex) 16)
+		 (when form-floatp 10)
+		 10))
+      ;; :upcase => t or nil
+      (upcase (plist-get specs :upcase))
+
+      ;; override calc-environment
+      (calc-internal-prec (max (or precision 0) yabin-internal-prec))
+      (calc-float-format (list 'fix (or precision yabin--default-format-precision)))
+      (calc-number-radix radix)
+      (math-radix-explicit-format nil)
+      (calc-radix-formatter (lambda (rad num) (format "%s" num)))
+
+      ;; presentation values
+      (number (yabin--normalize value))
+      
+      (header (concat
+	       (cond ((math-lessp number 0) "-")
+		     ((eq sign 'space) " ")
+		     (sign "+"))
+	       (if special
+		   (cond ((eq radix 16) "0x")
+			 ((eq radix 8) "0")))))
+      (body (if form-decimalp
+		;; decimal/octal/hex
+		(yabin--to-string (if (math-infinitep number)
+				      0 ; nan/inf value.
+				    (math-abs (math-trunc number))))
+	      ;; float/decimal-point/exponential
+	      (let* ((float-number (math-abs (math-float number)))
+		     (mant (calcFunc-mant float-number))
+		     (xpon (calcFunc-xpon float-number))
+		     (float-precision (cadr calc-float-format)))
+		
+		;; NOTE: the nan value from `format' is depend by system, but
+		;; yabin uses "nan" and "inf" literal.
+		(if (math-infinitep number)
+		    (progn
+		      (setq zero-padding nil)
+		      (cond
+		       ((member number (list yabin--math-pnan yabin--math-nnan))
+			"nan")
+		       (t
+			"inf")))
+		  ;; not a nan/inf
+		  (when (or (eq form 'decimal-point)
+			  (and (eq form 'float)
+			       (math-lessp xpon (car yabin-exponential-form-threshold))
+			       (math-lessp (cdr yabin-exponential-form-threshold) xpon)))
+
+			(when (eq form 'float)
+			  (setq float-precision (+ float-precision
+						   (math-neg xpon))))
+			(setq mant float-number)
+			(setq xpon nil))
+		  
+		  (when (eq form 'float)
+		    (setq float-precision (+ float-precision
+					     (if (or (eq float-precision 0)
+						     (math-zerop mant))
+						 0 -1)))
+		    (setq calc-float-format (list 'fix float-precision)))
+		
+		  (concat 
+		   ;; mantissa
+		   (progn
+		     (setq mant (math-round mant float-precision))
+		     (cond
+		      ((eq form 'float)
+		       (if special
+			   (if (and (math-zerop mant) (eq precision 0))
+			       "0.0"
+			     (yabin--to-string (math-float mant)))
+			 (if (math-zerop mant) ; ignore precision
+			     "0"
+			   (save-match-data (replace-regexp-in-string
+					     "\\.?0*$" "" (yabin--to-string (math-float mant)))))
+			 ))
+		      (t
+		       (if (not (and (math-zerop mant) (eq precision 0)))
+			   (yabin--to-string (math-float mant))
+			 (if special "0." "0")))))
+		 		 
+		   ;; exponential
+		   (when xpon
+		     (let* ((xpon-body (math-format-number (math-abs xpon)))
+			    (xpon-pad (max 0 (- 3 (length xpon-body)))))
+		       (concat
+			(if upcase "E" "e")
+			(if (math-negp xpon) "-" "+")
+			(make-string xpon-pad ?0)
+			xpon-body)))
+		   )))))
+      (prec-pad-len (if (and form-decimalp precision)
+			(max 0 (- precision (length body)))
+		      0))
+      (pad-len (- width (+ (length header)
+			   prec-pad-len
+			   (length body)))))
+    
+     ;; combine header, padding, body
+     (setq body
+	   (cond
+	    ((<= pad-len 0)
+	     (concat header (make-string prec-pad-len ?0) body))
+	    (leftify
+	     (concat header (make-string prec-pad-len ?0) body (make-string pad-len ? )))
+	    ((and zero-padding (null precision))
+	     (concat header (make-string pad-len ?0) body))
+	    (t
+	     (concat (make-string pad-len ? ) header (make-string prec-pad-len ?0) body))))
+     (if (not upcase)
+	 (downcase body)
+       body)
+     ))
 
 ;; install aliases
 
