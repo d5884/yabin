@@ -118,3 +118,7 @@ All function have alias name like !FUNC => yabin-FUNC
   * `!less-than-equal` (`!<=`)
   * `!greater-than` (`!>`)
   * `!greater-than-equal` (`!>=`)
+
+* Formatting
+  * `!format`
+  * `!format-spec`
