@@ -35,7 +35,7 @@ All function have alias name like !FUNC => yabin-FUNC
    * `!add1` (`!1+`)
    * `!sub` (`!minus`, `!-`)
    * `!sub1` (`!1-`)
-   * `!multi` (`!\*`)
+   * `!multi` (`!*`)
    * `!div` (`!/`)
    * `!reminder` (`!%`)
    * `!mod`
